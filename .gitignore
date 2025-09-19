@@ -65,7 +65,6 @@ coverage/
 __snapshots__/
 
 # Optional: ignore compiled JavaScript if using TypeScript
-*.js
 *.js.map
 
 # Optional: ignore ESLint cache
