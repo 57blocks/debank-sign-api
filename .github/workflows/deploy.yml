@@ -9,8 +9,8 @@ on:
 env:
   AWS_REGION: ap-southeast-1
   ECR_REPOSITORY: capstack/debank-sign-api
-  ECS_SERVICE: debank-sign-api-service
-  ECS_CLUSTER: debank-sign-api-cluster
+  ECS_SERVICE: debank-sign
+  ECS_CLUSTER: capstack-fms
   ECS_TASK_DEFINITION: debank-sign-api
   CONTAINER_NAME: debank-sign-api
 
@@ -55,24 +55,56 @@ jobs:
       - name: Set image output
         run: echo "image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}" >> $GITHUB_OUTPUT
 
-#      - name: Download task definition
-#        run: |
-#          aws ecs describe-task-definition \
-#            --task-definition ${{ env.ECS_TASK_DEFINITION }} \
-#            --query taskDefinition > task-definition.json
-#
-#      - name: Fill in the new image ID in the Amazon ECS task definition
-#        id: task-def
-#        uses: aws-actions/amazon-ecs-render-task-definition@v1
-#        with:
-#          task-definition: task-definition.json
-#          container-name: ${{ env.CONTAINER_NAME }}
-#          image: ${{ steps.build-image.outputs.image }}
-#
-#      - name: Deploy Amazon ECS task definition
-#        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-#        with:
-#          task-definition: ${{ steps.task-def.outputs.task-definition }}
-#          service: ${{ env.ECS_SERVICE }}
-#          cluster: ${{ env.ECS_CLUSTER }}
-#          wait-for-service-stability: true
+      - name: Download task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.ECS_TASK_DEFINITION }} \
+            --query taskDefinition > task-definition.json
+
+      - name: Fill in the new image ID in the Amazon ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.build-image.outputs.image }}
+
+      - name: Deploy Amazon ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Clean up old task definitions
+        run: |
+          # Get all task definition revisions
+          REVISIONS=$(aws ecs list-task-definitions \
+            --family-prefix ${{ env.ECS_TASK_DEFINITION }} \
+            --status ACTIVE \
+            --sort DESC \
+            --query 'taskDefinitionArns[]' \
+            --output text)
+
+          # Convert to array
+          REVISIONS_ARRAY=($REVISIONS)
+
+          # Keep only the 3 most recent revisions
+          KEEP_COUNT=3
+          TOTAL_COUNT=${#REVISIONS_ARRAY[@]}
+
+          if [ $TOTAL_COUNT -gt $KEEP_COUNT ]; then
+            echo "Found $TOTAL_COUNT task definitions, keeping $KEEP_COUNT most recent"
+
+            # Deregister old revisions (skip first 3)
+            for (( i=$KEEP_COUNT; i<$TOTAL_COUNT; i++ )); do
+              TASK_DEF_ARN=${REVISIONS_ARRAY[$i]}
+              echo "Deregistering: $TASK_DEF_ARN"
+              aws ecs deregister-task-definition --task-definition $TASK_DEF_ARN > /dev/null
+            done
+
+            echo "Successfully cleaned up $((TOTAL_COUNT - KEEP_COUNT)) old task definitions"
+          else
+            echo "Only $TOTAL_COUNT task definitions found, no cleanup needed"
+          fi

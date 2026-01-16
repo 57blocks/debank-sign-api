@@ -4,6 +4,14 @@ const {getSignHeaders} = require('./puppeteer');
 const app = express();
 const port = 8899;
 
+app.get('/', (req, res) => {
+    res.json({
+        status: 'healthy',
+        service: 'debank-sign-api',
+        timestamp: new Date().toISOString()
+    });
+});
+
 app.get('/sign', async (req, res) => {
     const address = req.query.address;
 
