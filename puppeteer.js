@@ -32,7 +32,7 @@ async function getSignHeaders(address) {
         // 拦截请求
         page.on('request', request => {
             const url = request.url();
-            if (url.includes('/history/all_list')) {
+            if (url.includes('/history/list')) {
                 const headers = request.headers();
                 capturedHeaders = {};
 
@@ -46,8 +46,8 @@ async function getSignHeaders(address) {
             }
         });
 
-        const fullUrl = `https://debank.com/profile/${address}/history?mode=analysis`;
-        //const fullUrl = `https://debank.com/profile/${address}/history`;
+        //const fullUrl = `https://debank.com/profile/${address}/history?mode=analysis`;
+        const fullUrl = `https://debank.com/profile/${address}/history`;
         await page.goto(fullUrl, {waitUntil: 'networkidle2'});
 
         // 等待请求完成
