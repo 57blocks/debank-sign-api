@@ -1,7 +1,7 @@
 const puppeteer = require('puppeteer');
 
 async function getSignHeaders(address) {
-    const headersToCapture = ['x-api-sign', 'x-api-ts', 'x-api-nonce', 'x-api-ver'];
+    const headersToCapture = ['x-api-sign', 'x-api-ts', 'x-api-nonce', 'x-api-ver', 'x-api-key', 'x-api-time'];
     let capturedHeaders = null;
 
     const browser = await puppeteer.launch({
@@ -47,6 +47,7 @@ async function getSignHeaders(address) {
         });
 
         const fullUrl = `https://debank.com/profile/${address}/history?mode=analysis`;
+        //const fullUrl = `https://debank.com/profile/${address}/history`;
         await page.goto(fullUrl, {waitUntil: 'networkidle2'});
 
         // 等待请求完成
