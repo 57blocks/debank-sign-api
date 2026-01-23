@@ -48,10 +48,13 @@ async function getSignHeaders(address) {
 
         //const fullUrl = `https://debank.com/profile/${address}/history?mode=analysis`;
         const fullUrl = `https://debank.com/profile/${address}/history`;
-        await page.goto(fullUrl, {waitUntil: 'networkidle2'});
+        await page.goto(fullUrl, {
+            waitUntil: 'networkidle2',
+            timeout: 120000 // 120秒超时
+        });
 
-        // 等待请求完成
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        // 等待请求完成，最长等60秒
+        await new Promise(resolve => setTimeout(resolve, 60000));
 
         return capturedHeaders;
     } catch (err) {
