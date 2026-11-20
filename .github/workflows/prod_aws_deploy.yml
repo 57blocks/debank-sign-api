@@ -1,0 +1,99 @@
+name: Prod (AWS 694913395694) - Deploy
+
+# Production in the new account: service prod-debank-sign in cluster capstack-prod, reached at
+# https://fms-api.capstack.xyz/sign*. Pushes to ci/aws-prod deploy; after merging to main it can also be run by hand.
+# Reads no GitHub secret: the role ARN is below and the job runs in the GitHub environment prod-aws.
+# AWS resources come from infrastructure/capstack-prod (Terraform). deploy.yml (tokenpad) is unchanged.
+on:
+  push:
+    branches: [ci/aws-prod]
+  workflow_dispatch:
+
+concurrency:
+  group: prod-aws-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-1
+  AWS_ROLE_ARN: arn:aws:iam::694913395694:role/capstack-prod-debank-sign-deploy
+  ECR_REPOSITORY: capstack/debank-sign-api
+  ECS_CLUSTER: capstack-prod
+  ECS_SERVICE: prod-debank-sign
+  ECS_TASK_FAMILY: prod-debank-sign
+  CONTAINER_NAME: debank-sign-api
+  KEEP_TASK_DEFINITIONS: 3
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod-aws
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image to Amazon ECR
+        id: build-image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+          cache-from: type=gha,scope=prod-aws
+          cache-to: type=gha,scope=prod-aws,mode=max
+
+      - name: Download task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$ECS_TASK_FAMILY" \
+            --query taskDefinition > task-definition.json
+
+      - name: Fill in the new image ID in the Amazon ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
+      - name: Deploy Amazon ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Deregister old task definitions
+        run: |
+          mapfile -t revisions < <(aws ecs list-task-definitions \
+            --family-prefix "$ECS_TASK_FAMILY" \
+            --status ACTIVE \
+            --sort DESC \
+            --query 'taskDefinitionArns[]' \
+            --output text | tr '\t' '\n' | sed '/^$/d')
+          echo "Found ${#revisions[@]} revisions, keeping $KEEP_TASK_DEFINITIONS"
+          for arn in "${revisions[@]:$KEEP_TASK_DEFINITIONS}"; do
+            echo "Deregistering $arn"
+            aws ecs deregister-task-definition --task-definition "$arn" > /dev/null
+          done
